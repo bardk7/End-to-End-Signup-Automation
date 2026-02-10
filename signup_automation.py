@@ -1,20 +1,3 @@
-#!/usr/bin/env python3
-"""
-╔═══════════════════════════════════════════════════════════════════╗
-║  FULLY AUTOMATED SIGNUP — authorized-partner.vercel.app          ║
-║  Stack : Python + Playwright (Chromium)                          ║
-║  Mode  : 100 % Automated — Zero Manual Intervention              ║
-╠═══════════════════════════════════════════════════════════════════╣
-║  Steps:                                                          ║
-║   0  Accept Terms & Conditions                                   ║
-║   1  Account Setup  (name / email / phone / password)            ║
-║  1b  OTP Verification  (auto-fetched from Mailinator)            ║
-║   2  Agency Details (name / role / email / website / region)     ║
-║   3  Professional Experience                                     ║
-║   4  Verification & Preferences  (docs / countries / certs)      ║
-╚═══════════════════════════════════════════════════════════════════╝
-"""
-
 import asyncio
 import os
 import re
@@ -553,6 +536,102 @@ async def main():
         await page.locator("button[type='submit']").click()
         ok("Professional experience submitted")
         await page.wait_for_timeout(5000)
+
+        # STEP 4 : Verification 
+        banner(4, "VERIFICATION & PREFERENCES")
+
+        await page.wait_for_selector(
+            "input[name='business_registration_number']",
+            state="visible", timeout=15_000,
+        )
+
+        await page.fill(
+            "input[name='business_registration_number']", BIZ_REG_NO
+        )
+        ok(f"business_registration_number = {BIZ_REG_NO}")
+
+        info("Discovering available Preferred Countries …")
+        country_combo = page.locator("button[role='combobox']")
+        available_countries = await discover_dialog_options(page, country_combo)
+        info(f"Available countries: {available_countries}")
+        if available_countries:
+            pick_count = random.randint(1, min(3, len(available_countries)))
+            chosen_countries = random.sample(available_countries, k=pick_count)
+        else:
+            chosen_countries = PREF_COUNTRIES  # fallback
+        info(f"Selected countries: {chosen_countries}")
+        await pick_from_dialog_combobox(page, country_combo, chosen_countries)
+
+        info("Discovering available Institution Types …")
+        available_inst = await discover_checkbox_labels(page)
+        info(f"Available institution types: {available_inst}")
+        if available_inst:
+            pick_count = random.randint(1, len(available_inst))
+            chosen_inst = random.sample(available_inst, k=pick_count)
+        else:
+            chosen_inst = INST_TYPES  # fallback
+        info(f"Selected institution types: {chosen_inst}")
+        await tick_checkboxes(page, chosen_inst)
+
+        await page.fill("input[name='certification_details']", CERT_DETAILS)
+        ok(f"certification_details = {CERT_DETAILS}")
+
+        # File uploads 
+        info("Uploading business documents …")
+        doc_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "_temp_business_doc.txt",
+        )
+        with open(doc_path, "w") as fh:
+            fh.write(
+                f"Business Registration Document\n"
+                f"Agency: {AGENCY_NAME}\n"
+                f"Registration No: {BIZ_REG_NO}\n"
+                f"Date: {time.strftime('%Y-%m-%d')}\n"
+            )
+
+        file_inputs = page.locator("input[type='file']")
+        n = await file_inputs.count()
+        for i in range(n):
+            await file_inputs.nth(i).set_input_files(doc_path)
+            ok(f"    file input #{i + 1} ← _temp_business_doc.txt")
+            await page.wait_for_timeout(500)
+
+        add_docs = page.locator("button:has-text('Add Documents')")
+        if await add_docs.count() > 0 and await add_docs.is_visible():
+            await add_docs.click()
+            ok("Clicked 'Add Documents'")
+            await page.wait_for_timeout(1000)
+
+        # Final Submit
+        submit = page.locator("button[type='submit']:has-text('Submit')")
+        if await submit.count() == 0:
+            submit = page.locator("button[type='submit']").last
+        await submit.click()
+        ok("FINAL SUBMIT clicked — Signup complete!")
+        await page.wait_for_timeout(5000)
+
+        # RESULT 
+        final_url = page.url
+        body = await page.locator("body").inner_text()
+
+        print(f"\n{'═' * BAR}")
+        print(f"#  SIGNUP AUTOMATION FINISHED  (SUCCESS)")
+        print(f"{'═' * BAR}")
+        print(f"  Final URL : {final_url}")
+        print(f"  Page content (first lines):")
+        for line in body.strip().splitlines()[:10]:
+            stripped = line.strip()
+            if stripped:
+                print(f"    │ {stripped}")
+
+        # Cleanup temp file
+        try:
+            os.remove(doc_path)
+        except OSError:
+            pass
+
+        await page.wait_for_timeout(7_000)
 
         await context.close()
         await browser.close()
