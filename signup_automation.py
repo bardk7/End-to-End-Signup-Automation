@@ -354,10 +354,43 @@ async def main():
         # STEP 0 : Terms
         banner(0, "TERMS & CONDITIONS")
 
-        info(f"Navigating to {BASE_URL}/register …")
-        await page.goto(f"{BASE_URL}/register",
+        info(f"Navigating to {BASE_URL} …")
+        await page.goto(BASE_URL,
                         wait_until="networkidle", timeout=30_000)
         await page.wait_for_timeout(2000)
+
+        # Discover a visible registration link from the homepage UI
+        info("Scanning page for visible registration links …")
+        all_links = page.locator("a[href]")
+        link_count = await all_links.count()
+        candidates = []
+        for i in range(link_count):
+            link = all_links.nth(i)
+            href = await link.get_attribute("href")
+            if href and "register" in href:
+                if await link.is_visible():
+                    label = (await link.inner_text()).strip()
+                    box = await link.bounding_box()
+                    info(f"  Visible link #{len(candidates)}: '{label}' → {href}  (y={box['y']:.0f})" if box else f"  Visible link: '{label}' → {href}")
+                    candidates.append((link, label, box))
+        if not candidates:
+            raise RuntimeError("Could not discover a visible registration link on the homepage.")
+
+        reg_link, reg_label, _ = candidates[0]
+        for link, label, box in candidates:
+            if box and box["y"] > 100:  # skip navbar links at the top
+                reg_link, reg_label = link, label
+                break
+
+        info(f"Clicking: '{reg_label}'")
+        await reg_link.scroll_into_view_if_needed()
+        await page.wait_for_timeout(1000)
+        
+        await reg_link.hover()
+
+        await reg_link.click()
+        ok(f"Clicked '{reg_label}'")
+        await page.wait_for_timeout(3000)
 
         await page.locator("button[role='checkbox']").click()
         ok("Agreed to Terms & Conditions")
