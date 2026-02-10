@@ -1,0 +1,383 @@
+import asyncio
+import os
+import re
+import sys
+import time
+import random
+import string
+from playwright.async_api import async_playwright
+
+# Force unbuffered output so every line appears immediately
+sys.stdout.reconfigure(line_buffering=True)
+
+# CONFIGURATION
+BASE_URL = "https://authorized-partner.vercel.app"
+TS       = int(time.time())
+
+# -- Random data pools --
+_FIRST_NAMES = [
+    "Aarav", "Bishal", "Carlos", "David", "Elena", "Fatima", "Gaurav",
+    "Hiroshi", "Isabelle", "Jiang", "Kumar", "Liam", "Manisha", "Nora",
+    "Oscar", "Priya", "Qasim", "Rashid", "Sara", "Tenzin", "Uma",
+    "Viktor", "Wei", "Xena", "Yuki", "Zara",
+]
+_LAST_NAMES = [
+    "Adhikari", "Bhandari", "Chen", "Diaz", "Evans", "Fernandez",
+    "Gurung", "Hayashi", "Ibrahim", "Joshi", "Kim", "Lamichhane",
+    "Maharjan", "Nakamura", "Olsen", "Patel", "Quinn", "Rai",
+    "Sharma", "Thapa", "Upadhyay", "Vaidya", "Wang", "Xu", "Yamada", "Zhang",
+]
+_ROLES = [
+    "Managing Director", "Chief Executive Officer", "Operations Manager",
+    "Senior Consultant", "Branch Manager", "Head of Admissions",
+    "Country Director", "Regional Manager", "Partner", "Founder",
+]
+_AGENCY_PREFIXES = [
+    "Global", "Elite", "Prime", "Apex", "Pacific", "Summit",
+    "Prestige", "Pioneer", "Horizon", "Zenith", "Vertex", "Nova",
+]
+_AGENCY_SUFFIXES = [
+    "Education Consultancy", "Study Abroad", "International Services",
+    "Edu Solutions", "Academic Partners", "Learning Hub",
+    "Migration Services", "Career Pathways", "Consulting Group",
+]
+_DOMAINS = [
+    "educonsult", "studypath", "globaleduhub", "primeadvisors",
+    "elitestudies", "apexedu", "horizonlearn", "summitcareers",
+]
+_STREETS = [
+    "Durbar Marg", "New Road", "Lazimpat", "Thamel Chowk",
+    "Putalisadak", "Battisputali", "Baluwatar", "Kamaladi",
+]
+_CITIES = [
+    "Kathmandu", "Lalitpur", "Bhaktapur",
+    "Pokhara", "Biratnagar", "Chitwan",
+]
+_ALL_REGIONS = [
+    "Australia", "Europe", "North America", "Asia", "Middle East",
+    "United Kingdom", "South America", "Africa",
+]
+_EXP_OPTIONS = ["1 Year", "2 Years", "3 Years", "5 Years", "10 Years"]
+_FOCUS_AREAS = [
+    "University admissions consulting and student visa processing",
+    "Scholarship guidance and academic pathway planning",
+    "Postgraduate placement and research program advisory",
+    "Vocational training enrollment and skills-based migration",
+    "Language course placement and pre-departure orientation",
+    "Medical and engineering university admissions",
+    "MBA and business school application management",
+]
+_CERT_OPTIONS = [
+    "ICEF Certified Education Agent",
+    "PIER Certified",
+    "QEAC Registered Agent",
+    "British Council Partner",
+    "AIRC Certified",
+    "NAFSA Member",
+    "Education New Zealand Recognised Agent",
+]
+_ALL_COUNTRIES = [
+    "Australia", "Canada", "United Kingdom", "United States",
+    "New Zealand", "Germany", "Japan", "South Korea",
+]
+_ALL_SERVICES = [
+    "Career Counseling",
+    "Admission Applications",
+    "Visa Processing",
+    "Test Preparation",
+]
+
+def _rand_password(length=14):
+    """Generate a strong random password meeting common complexity rules."""
+    upper = random.choice(string.ascii_uppercase)
+    lower = random.choice(string.ascii_lowercase)
+    digit = random.choice(string.digits)
+    symbol = random.choice("!@#$%&*")
+    rest = ''.join(random.choices(
+        string.ascii_letters + string.digits + "!@#$%&*", k=length - 4
+    ))
+    pwd = list(upper + lower + digit + symbol + rest)
+    random.shuffle(pwd)
+    return ''.join(pwd)
+
+# Account (Step 1)
+EMAIL_USER   = f"autobot{TS}"
+EMAIL        = f"{EMAIL_USER}@mailinator.com"
+FIRST_NAME   = random.choice(_FIRST_NAMES)
+LAST_NAME    = random.choice(_LAST_NAMES)
+PHONE        = f"9841{random.randint(100000, 999999)}"   # Nepal mobile
+PASSWORD     = _rand_password()
+
+# -- Agency Details (Step 2) --
+AGENCY_NAME  = f"{random.choice(_AGENCY_PREFIXES)} {random.choice(_AGENCY_SUFFIXES)} {TS}"
+ROLE         = random.choice(_ROLES)
+AGENCY_EMAIL = f"agency{TS}@mailinator.com"
+AGENCY_WEB   = f"www.{random.choice(_DOMAINS)}{random.randint(10,99)}.com"
+AGENCY_ADDR  = f"{random.choice(_STREETS)}, {random.choice(_CITIES)}, Nepal"
+REGIONS      = random.sample(_ALL_REGIONS, k=random.randint(1, 3))
+
+# -- Professional Experience (Step 3) --
+EXP_YEARS      = random.choice(_EXP_OPTIONS)
+STUDENTS_PA    = str(random.randint(20, 500))
+FOCUS_AREA     = random.choice(_FOCUS_AREAS)
+SUCCESS_METRIC = str(random.randint(70, 99))
+SERVICES       = random.sample(_ALL_SERVICES, k=random.randint(2, len(_ALL_SERVICES)))
+
+# -- Verification & Preferences (Step 4) --
+BIZ_REG_NO     = f"BRN-{TS}"
+PREF_COUNTRIES = random.sample(_ALL_COUNTRIES, k=random.randint(1, 3))
+INST_TYPES     = ["Universities", "Colleges"]
+CERT_DETAILS   = ", ".join(random.sample(_CERT_OPTIONS, k=random.randint(2, 4)))
+
+# HELPERS
+BAR = 64
+
+
+def banner(step, title):
+    """Print a highly visible step header."""
+    print(f"\n{'=' * BAR}")
+    print(f"  STEP {step}  --  {title}")
+    print(f"{'=' * BAR}")
+
+
+def ok(msg):
+    print(f"  [ OK ]  {msg}")
+
+
+def info(msg):
+    print(f"  [INFO]  {msg}")
+
+
+def warn(msg):
+    print(f"  [WARN]  {msg}")
+
+
+# OTP retrieval from Mailinator
+async def fetch_otp(browser, user, retries=20, interval=3):
+    """Open a disposable browser context, scrape the OTP from Mailinator."""
+    inbox_url = f"https://www.mailinator.com/v4/public/inboxes.jsp?to={user}"
+    ctx = await browser.new_context()
+    pg  = await ctx.new_page()
+    otp = None
+
+    for attempt in range(1, retries + 1):
+        try:
+            await pg.goto(inbox_url, wait_until="networkidle", timeout=20_000)
+            await pg.wait_for_timeout(2000)
+
+            rows = pg.locator("table tbody tr")
+            count = await rows.count()
+
+            # Row 0 is the header ("From  Subject  Received")
+            # Real emails start at row 1
+            if count < 2:
+                info(f"Attempt {attempt}/{retries}: inbox empty ({count} rows) — retrying in {interval}s …")
+                await pg.wait_for_timeout(interval * 1000)
+                continue
+
+            # Find the actual email row (skip header at index 0)
+            email_row = None
+            for i in range(1, count):
+                row_text = await rows.nth(i).inner_text()
+                info(f"  Row {i}: {row_text[:100]}")
+                if any(kw in row_text.lower() for kw in ["otp", "signup", "verif", "confirm", "code"]):
+                    email_row = rows.nth(i)
+                    break
+
+            if email_row is None:
+                email_row = rows.nth(1)  # fallback: first non-header row
+
+            info("Opening email message …")
+            await email_row.click()
+            await pg.wait_for_timeout(5000)
+
+            # Extract OTP from the email iframe
+            body = ""
+            try:
+                body = await (
+                    pg.frame_locator("#html_msg_body")
+                      .locator("body")
+                      .inner_text(timeout=10_000)
+                )
+                info(f"  iframe body (first 200): {body[:200]}")
+            except Exception as e:
+                warn(f"  Could not read iframe: {e}")
+
+            if not body:
+                # Fallback: check all frames
+                for frame in pg.frames:
+                    try:
+                        txt = await frame.locator("body").inner_text(timeout=3000)
+                        if "otp" in txt.lower() or "verif" in txt.lower() or "code" in txt.lower():
+                            body = txt
+                            break
+                    except:
+                        continue
+
+            if body:
+                m = re.search(r"\b(\d{6})\b", body)
+                if m:
+                    otp = m.group(1)
+                    ok(f"OTP retrieved: {otp}")
+                    break
+                else:
+                    warn(f"Attempt {attempt}: email body found but no 6-digit OTP")
+            else:
+                warn(f"Attempt {attempt}: email clicked but body is empty")
+
+        except Exception as exc:
+            info(f"Attempt {attempt}: {str(exc)[:100]}")
+
+        await pg.wait_for_timeout(interval * 1000)
+
+    await ctx.close()
+    if otp is None:
+        raise RuntimeError("Could not retrieve OTP after maximum retries — aborting.")
+    return otp
+
+
+# Discover available options from a dialog-combobox 
+async def discover_dialog_options(page, combo_locator):
+    """Open a dialog-combobox, read all available option texts, close it."""
+    await combo_locator.click()
+    await page.wait_for_timeout(1000)
+
+    dlg = page.locator("[role='dialog']")
+    await dlg.wait_for(state="visible", timeout=5000)
+
+    available = []
+    spans = dlg.locator("div[role='option'] span, label span, [data-value] span, span")
+    count = await spans.count()
+    for i in range(count):
+        txt = (await spans.nth(i).inner_text()).strip()
+        if txt and txt not in available and len(txt) > 1:
+            available.append(txt)
+
+    await page.keyboard.press("Escape")
+    await page.wait_for_timeout(500)
+    return available
+
+
+# Discover available options from a standard dropdown
+async def discover_dropdown_options(page, combo_locator):
+    """Open a Radix select dropdown, read all role='option' texts, close it."""
+    await combo_locator.click()
+    await page.wait_for_timeout(1000)
+
+    available = []
+    opts = page.locator("[role='option']")
+    count = await opts.count()
+    for i in range(count):
+        txt = (await opts.nth(i).inner_text()).strip()
+        if txt and txt not in available:
+            available.append(txt)
+
+    await page.keyboard.press("Escape")
+    await page.wait_for_timeout(500)
+    return available
+
+
+# Discover available checkbox labels
+async def discover_checkbox_labels(page):
+    """Read all label texts that have an adjacent checkbox button."""
+    available = []
+    labels = page.locator("label")
+    count = await labels.count()
+    for i in range(count):
+        parent = labels.nth(i).locator("..")
+        btn = parent.locator("button[role='checkbox']")
+        if await btn.count() > 0:
+            txt = (await labels.nth(i).inner_text()).strip()
+            if txt:
+                available.append(txt)
+    return available
+
+
+# Dialog-based multi-select combobox (Region / Country)
+async def pick_from_dialog_combobox(page, combo_locator, options):
+    """Click a Radix dialog-combobox, tick the desired options, press Escape."""
+    await combo_locator.click()
+    await page.wait_for_timeout(1000)
+
+    dlg = page.locator("[role='dialog']")
+    await dlg.wait_for(state="visible", timeout=5000)
+
+    for opt in options:
+        el = dlg.locator(f"span:text-is('{opt}')")
+        if await el.count() == 0:                       # fallback: partial text
+            el = dlg.get_by_text(opt, exact=False)
+        if await el.count() > 0:
+            await el.first.click()
+            ok(f"    [x] {opt}")
+            await page.wait_for_timeout(300)
+        else:
+            warn(f"    option '{opt}' not found in dialog")
+
+    await page.keyboard.press("Escape")
+    await page.wait_for_timeout(500)
+
+
+# Tick checkbox buttons next to labels 
+async def tick_checkboxes(page, labels):
+    for txt in labels:
+        lbl = page.locator(f"label:has-text('{txt}')").first
+        if await lbl.count() == 0:
+            warn(f"    checkbox '{txt}' not found")
+            continue
+        parent = lbl.locator("..")
+        btn = parent.locator("button[role='checkbox']")
+        if await btn.count() > 0:
+            await btn.click()
+        else:
+            await lbl.click()
+        ok(f"    [x] {txt}")
+        await page.wait_for_timeout(300)
+
+
+# MAIN
+async def main():
+    print(f"\n{'=' * BAR}")
+    print(f"AUTOMATED SIGNUP — authorized-partner.vercel.app")
+    print(f"{'=' * BAR}")
+    print(f"  Email     : {EMAIL}")
+    print(f"  Phone     : +977 {PHONE}")
+    print(f"  Agency    : {AGENCY_NAME}")
+    print(f"  Password  : {PASSWORD}")
+
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=False, slow_mo=200)
+        context = await browser.new_context(
+            viewport={"width": 1280, "height": 900}
+        )
+        page = await context.new_page()
+
+        # STEP 0 : Terms
+        banner(0, "TERMS & CONDITIONS")
+
+        info(f"Navigating to {BASE_URL}/register …")
+        await page.goto(f"{BASE_URL}/register",
+                        wait_until="networkidle", timeout=30_000)
+        await page.wait_for_timeout(2000)
+
+        await page.locator("button[role='checkbox']").click()
+        ok("Agreed to Terms & Conditions")
+
+        await page.locator("button:has-text('Continue')").click()
+        ok("Clicked Continue")
+        await page.wait_for_timeout(2000)
+
+        await context.close()
+        await browser.close()
+
+    print(f"\n{'═' * BAR}")
+    print("  Done. All resources released.")
+    print(f"{'═' * BAR}\n")
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except Exception as exc:
+        import traceback
+        print(f"\n!!! ERROR !!!\n{exc}")
+        traceback.print_exc()
