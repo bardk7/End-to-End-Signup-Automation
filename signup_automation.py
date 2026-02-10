@@ -456,7 +456,39 @@ async def main():
         current_url = page.url
         info(f"Post-verification URL: {current_url}")
 
-        await page.wait_for_timeout(7_000)
+        # STEP 2 : Agency Details
+        banner(2, "AGENCY DETAILS")
+
+        await page.wait_for_selector(
+            "input[name='agency_name']", state="visible", timeout=30_000
+        )
+
+        fields_2 = {
+            "agency_name":    AGENCY_NAME,
+            "role_in_agency": ROLE,
+            "agency_email":   AGENCY_EMAIL,
+            "agency_website": AGENCY_WEB,
+            "agency_address": AGENCY_ADDR,
+        }
+        for name, val in fields_2.items():
+            await page.fill(f"input[name='{name}']", val)
+            ok(f"{name:>20s} = {val}")
+
+        info("Discovering available Regions of Operation …")
+        region_combo = page.locator("button[role='combobox']")
+        available_regions = await discover_dialog_options(page, region_combo)
+        info(f"Available regions: {available_regions}")
+        if available_regions:
+            pick_count = random.randint(1, min(3, len(available_regions)))
+            chosen_regions = random.sample(available_regions, k=pick_count)
+        else:
+            chosen_regions = REGIONS  # fallback to config
+        info(f"Selected regions: {chosen_regions}")
+        await pick_from_dialog_combobox(page, region_combo, chosen_regions)
+
+        await page.locator("button[type='submit']").click()
+        ok("Agency details submitted")
+        await page.wait_for_timeout(5000)
 
         await context.close()
         await browser.close()
