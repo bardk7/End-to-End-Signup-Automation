@@ -366,6 +366,98 @@ async def main():
         ok("Clicked Continue")
         await page.wait_for_timeout(2000)
 
+        # STEP 1 : Account Setup
+        banner(1, "ACCOUNT SETUP")
+
+        fields_1 = {
+            "firstName":       FIRST_NAME,
+            "lastName":        LAST_NAME,
+            "email":           EMAIL,
+            "phoneNumber":     PHONE,
+            "password":        PASSWORD,
+            "confirmPassword": PASSWORD,
+        }
+        for name, val in fields_1.items():
+            await page.fill(f"input[name='{name}']", val)
+            ok(f"{name:>20s} = {val}")
+
+        await page.locator("button[type='submit']").click()
+        ok("Account form submitted — waiting for OTP screen …")
+
+        otp_input = page.locator("input[inputmode='numeric']")
+        await otp_input.wait_for(state="visible", timeout=30_000)
+        ok("OTP input field appeared")
+
+        # STEP 1b : OTP Verification
+        banner("1b", "OTP VERIFICATION  (via Mailinator)")
+
+        MAX_OTP_ATTEMPTS = 3
+        otp_verified = False
+
+        for otp_attempt in range(1, MAX_OTP_ATTEMPTS + 1):
+            info(f"OTP attempt {otp_attempt}/{MAX_OTP_ATTEMPTS}")
+            info("Waiting 5 s for email delivery …")
+            await page.wait_for_timeout(5_000)
+
+            otp = await fetch_otp(browser, EMAIL_USER)
+
+            # Re-locate the OTP input (may have been re-rendered after resend)
+            otp_input = page.locator("input[inputmode='numeric']")
+            await otp_input.first.wait_for(state="visible", timeout=10_000)
+
+            # Clear any previously typed OTP digits
+            otp_fields = page.locator("input[inputmode='numeric']")
+            otp_count = await otp_fields.count()
+            for idx in range(otp_count):
+                await otp_fields.nth(idx).fill("")
+            await page.wait_for_timeout(200)
+
+            await otp_input.first.click()
+            await page.wait_for_timeout(300)
+            for digit in otp:
+                await page.keyboard.press(digit)
+                await page.wait_for_timeout(150)
+            ok(f"Typed OTP: {otp}")
+
+            await page.locator("button[type='submit']").click()
+            ok("Verification submitted")
+            await page.wait_for_timeout(4000)
+
+            # Check for error messages on the page
+            error_text = ""
+            try:
+                error_el = page.locator("[role='alert'], .text-red, .text-destructive, .error")
+                if await error_el.count() > 0:
+                    error_text = await error_el.first.inner_text(timeout=2000)
+                    warn(f"Page error detected: {error_text}")
+            except Exception:
+                pass
+
+            if "expired" in error_text.lower() or "invalid" in error_text.lower():
+                if otp_attempt < MAX_OTP_ATTEMPTS:
+                    info("OTP expired or invalid — attempting to resend …")
+                    resend_btn = page.locator("button:has-text('Resend'), button:has-text('resend'), a:has-text('Resend'), a:has-text('resend')")
+                    if await resend_btn.count() > 0:
+                        await resend_btn.first.click()
+                        ok("Clicked Resend OTP")
+                        await page.wait_for_timeout(3000)
+                    else:
+                        warn("No resend button found — retrying fetch anyway")
+                    continue
+                else:
+                    raise RuntimeError("OTP verification failed after all retry attempts.")
+            else:
+                otp_verified = True
+                break
+
+        if not otp_verified:
+            raise RuntimeError("OTP verification did not succeed.")
+
+        current_url = page.url
+        info(f"Post-verification URL: {current_url}")
+
+        await page.wait_for_timeout(7_000)
+
         await context.close()
         await browser.close()
 
