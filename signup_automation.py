@@ -1,3 +1,20 @@
+#!/usr/bin/env python3
+"""
+╔═══════════════════════════════════════════════════════════════════╗
+║  FULLY AUTOMATED SIGNUP — authorized-partner.vercel.app          ║
+║  Stack : Python + Playwright (Chromium)                          ║
+║  Mode  : 100 % Automated — Zero Manual Intervention              ║
+╠═══════════════════════════════════════════════════════════════════╣
+║  Steps:                                                          ║
+║   0  Accept Terms & Conditions                                   ║
+║   1  Account Setup  (name / email / phone / password)            ║
+║  1b  OTP Verification  (auto-fetched from Mailinator)            ║
+║   2  Agency Details (name / role / email / website / region)     ║
+║   3  Professional Experience                                     ║
+║   4  Verification & Preferences  (docs / countries / certs)      ║
+╚═══════════════════════════════════════════════════════════════════╝
+"""
+
 import asyncio
 import os
 import re
@@ -488,6 +505,53 @@ async def main():
 
         await page.locator("button[type='submit']").click()
         ok("Agency details submitted")
+        await page.wait_for_timeout(5000)
+
+        # STEP 3 : Professional Experience 
+        banner(3, "PROFESSIONAL EXPERIENCE")
+
+        # Years of Experience — discover then pick
+        info("Discovering Years of Experience options …")
+        exp_combo = page.locator("button[role='combobox']").first
+        available_years = await discover_dropdown_options(page, exp_combo)
+        info(f"Available experience options: {available_years}")
+        if available_years:
+            chosen_exp = random.choice(available_years)
+        else:
+            chosen_exp = EXP_YEARS  # fallback
+        info(f"Selecting: {chosen_exp}")
+        await exp_combo.click()
+        await page.wait_for_timeout(1000)
+        year_opt = page.locator(f"[role='option']:has-text('{chosen_exp}')")
+        if await year_opt.count() > 0:
+            await year_opt.first.click()
+        else:
+            await page.get_by_text(chosen_exp, exact=False).first.click()
+        ok(f"Years of Experience = {chosen_exp}")
+        await page.wait_for_timeout(500)
+
+        fields_3 = {
+            "number_of_students_recruited_annually": STUDENTS_PA,
+            "focus_area":    FOCUS_AREA,
+            "success_metrics": SUCCESS_METRIC,
+        }
+        for name, val in fields_3.items():
+            await page.fill(f"input[name='{name}']", val)
+            ok(f"{name:>42s} = {val}")
+
+        info("Discovering available services …")
+        available_services = await discover_checkbox_labels(page)
+        info(f"Available services: {available_services}")
+        if available_services:
+            pick_count = random.randint(2, len(available_services))
+            chosen_services = random.sample(available_services, k=pick_count)
+        else:
+            chosen_services = SERVICES  # fallback
+        info(f"Selected services: {chosen_services}")
+        await tick_checkboxes(page, chosen_services)
+
+        await page.locator("button[type='submit']").click()
+        ok("Professional experience submitted")
         await page.wait_for_timeout(5000)
 
         await context.close()
