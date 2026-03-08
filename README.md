@@ -1,4 +1,4 @@
-# QA Automation: Multi-page Signup (Playwright + Python)
+# End-to-End Signup Automation with Python Playwright and Mailinator OTP Retrieval
 
 Fully automated end-to-end signup for [authorized-partner.vercel.app](https://authorized-partner.vercel.app) using **Python** and **Playwright (Chromium)**.
 
